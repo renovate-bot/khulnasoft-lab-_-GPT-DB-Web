@@ -1,4 +1,11 @@
-export type DBOption = { label: string; value: DBType; disabled?: boolean; isFileDb?: boolean; icon: string; desc?: string };
+export type DBOption = {
+  label: string;
+  value: DBType;
+  disabled?: boolean;
+  isFileDb?: boolean;
+  icon: string;
+  desc?: string;
+};
 
 export type DBType =
   | 'mysql'
@@ -8,6 +15,7 @@ export type DBType =
   | 'clickhouse'
   | 'oracle'
   | 'postgresql'
+  | 'vertica'
   | 'db2'
   | 'access'
   | 'mongodb'
@@ -60,4 +68,9 @@ export type PromptProps = {
   prompt_name: string;
   gmt_created: string;
   gmt_modified: string;
+};
+
+export type PostDbRefreshParams = {
+  db_name: string;
+  db_type: DBType;
 };

@@ -1,18 +1,31 @@
-import React from 'react';
-import { useRequest } from 'ahooks';
-import { Select, Option, Table, Box, Typography, Tooltip } from '@mui/joy';
-import { Button } from 'antd';
-import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
-import { Input, Tree, Empty, Tabs } from 'antd';
-import type { DataNode } from 'antd/es/tree';
-import MonacoEditor from './monaco-editor';
 import { sendGetRequest, sendSpacePostRequest } from '@/utils/request';
-import { useSearchParams } from 'next/navigation';
+import Icon from '@ant-design/icons';
 import { OnChange } from '@monaco-editor/react';
-import Header from './header';
+import { useRequest } from 'ahooks';
+import { Button, Input, Select, Table, Tooltip, Tree } from 'antd';
+import type { DataNode } from 'antd/es/tree';
+import { useSearchParams } from 'next/navigation';
+import { ChangeEvent, Key, useEffect, useMemo, useState } from 'react';
 import Chart from '../chart';
+import Header from './header';
+import MonacoEditor, { ISession } from './monaco-editor';
+
+import SplitScreenHeight from '@/components/icons/split-screen-height';
+import SplitScreenWeight from '@/components/icons/split-screen-width';
+import { CaretRightOutlined, LeftOutlined, RightOutlined, SaveFilled } from '@ant-design/icons';
+import { ColumnType } from 'antd/es/table';
+import classNames from 'classnames';
+import MyEmpty from '../common/MyEmpty';
+import Database from '../icons/database';
+import Field from '../icons/field';
+import TableIcon from '../icons/table';
 
 const { Search } = Input;
+
+type ITableData = {
+  columns: string[];
+  values: (string | number)[][];
+};
 
 interface EditorValueProps {
   sql?: string;
@@ -30,7 +43,9 @@ interface RoundProps {
 interface IProps {
   editorValue?: EditorValueProps;
   chartData?: any;
-  tableData?: any;
+  tableData?: ITableData;
+  layout?: 'TB' | 'LR';
+  tables?: any;
   handleChange: OnChange;
 }
 
@@ -44,76 +59,119 @@ interface ITableTreeItem {
   children: Array<ITableTreeItem>;
 }
 
-function DbEditorContent({ editorValue, chartData, tableData, handleChange }: IProps) {
-  const chartWrapper = React.useMemo(() => {
-    if (!chartData) return <div></div>;
+function DbEditorContent({ layout = 'LR', editorValue, chartData, tableData, tables, handleChange }: IProps) {
+  const chartWrapper = useMemo(() => {
+    if (!chartData) return null;
     return (
-      <div className="flex-1 overflow-auto p-3" style={{ flexShrink: 0, overflow: 'hidden' }}>
+      <div className='flex-1 overflow-auto p-2' style={{ flexShrink: 0, overflow: 'hidden' }}>
         <Chart chartsData={[chartData]} />
       </div>
     );
   }, [chartData]);
 
+  const { columns, dataSource } = useMemo<{
+    columns: ColumnType<any>[];
+    dataSource: Record<string, string | number>[];
+  }>(() => {
+    const { columns: cols = [], values: vals = [] } = tableData ?? {};
+    const tbCols = cols.map<ColumnType<any>>(item => ({
+      key: item,
+      dataIndex: item,
+      title: item,
+    }));
+    const tbDatas = vals.map(row => {
+      return row.reduce<Record<string, string | number>>((acc, item, index) => {
+        acc[cols[index]] = item;
+        return acc;
+      }, {});
+    });
+
+    return {
+      columns: tbCols,
+      dataSource: tbDatas,
+    };
+  }, [tableData]);
+  const session: ISession = useMemo(() => {
+    const map: Record<string, { columnName: string; columnType: string }[]> = {};
+    const db = tables?.data;
+    const tableList = db?.children;
+    tableList?.forEach((table: ITableTreeItem) => {
+      map[table.title] = table.children.map((column: ITableTreeItem) => {
+        return {
+          columnName: column.title,
+          columnType: column.type,
+        };
+      });
+    });
+    return {
+      async getTableList(schemaName: any) {
+        if (schemaName && schemaName !== db?.title) {
+          return [];
+        }
+        return tableList?.map((table: ITableTreeItem) => table.title) || [];
+      },
+      async getTableColumns(tableName: any) {
+        return map[tableName] || [];
+      },
+      async getSchemaList() {
+        return db?.title ? [db?.title] : [];
+      },
+    };
+  }, [tables]);
   return (
-    <>
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1" style={{ flexShrink: 0, overflow: 'auto' }}>
-          <MonacoEditor value={editorValue?.sql || ''} language="mysql" onChange={handleChange} thoughts={editorValue?.thoughts || ''} />
-        </div>
-        {chartWrapper}
+    <div
+      className={classNames('flex w-full flex-1 h-full gap-2 overflow-hidden', {
+        'flex-col': layout === 'TB',
+        'flex-row': layout === 'LR',
+      })}
+    >
+      <div className='flex-1 flex overflow-hidden rounded'>
+        <MonacoEditor
+          value={editorValue?.sql || ''}
+          language='mysql'
+          onChange={handleChange}
+          thoughts={editorValue?.thoughts || ''}
+          session={session}
+        />
       </div>
-      <div className="h-96 border-[var(--joy-palette-divider)] border-t border-solid overflow-auto">
-        {tableData?.values?.length > 0 ? (
-          <Table aria-label="basic table" stickyHeader>
-            <thead>
-              <tr>
-                {tableData?.columns?.map((column: any, i: number) => (
-                  <th key={column + i}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData?.values?.map((value: any, i: number) => (
-                <tr key={i}>
-                  {Object.keys(value)?.map((v) => (
-                    <td key={v}>{value[v]}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+      <div className='flex-1 h-full overflow-auto bg-white dark:bg-theme-dark-container rounded p-4'>
+        {tableData?.values.length ? (
+          <Table bordered scroll={{ x: 'auto' }} rowKey={columns[0].key} columns={columns} dataSource={dataSource} />
         ) : (
-          <div className="h-full flex justify-center items-center">
-            <Empty />
+          <div className='h-full flex justify-center items-center'>
+            <MyEmpty />
           </div>
         )}
+        {chartWrapper}
       </div>
-    </>
+    </div>
   );
 }
 
 function DbEditor() {
-  const [expandedKeys, setExpandedKeys] = React.useState<React.Key[]>([]);
-  const [searchValue, setSearchValue] = React.useState('');
-  const [currentRound, setCurrentRound] = React.useState<null | string | number>();
-  const [autoExpandParent, setAutoExpandParent] = React.useState(true);
-  const [chartData, setChartData] = React.useState();
-  const [editorValue, setEditorValue] = React.useState<EditorValueProps | EditorValueProps[]>();
-  const [newEditorValue, setNewEditorValue] = React.useState<EditorValueProps>();
-  const [tableData, setTableData] = React.useState<{ columns: string[]; values: any }>();
-  const [currentTabIndex, setCurrentTabIndex] = React.useState<string>();
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  const [searchValue, setSearchValue] = useState('');
+  const [currentRound, setCurrentRound] = useState<null | string | number>();
+  const [autoExpandParent, setAutoExpandParent] = useState(true);
+  const [chartData, setChartData] = useState<any>();
+  const [editorValue, setEditorValue] = useState<EditorValueProps | EditorValueProps[]>();
+  const [newEditorValue, setNewEditorValue] = useState<EditorValueProps>();
+  const [tableData, setTableData] = useState<{ columns: string[]; values: (string | number)[] }>();
+  const [currentTabIndex, setCurrentTabIndex] = useState<number>();
+  const [isMenuExpand, setIsMenuExpand] = useState<boolean>(false);
+  const [layout, setLayout] = useState<'TB' | 'LR'>('TB');
 
   const searchParams = useSearchParams();
   const id = searchParams?.get('id');
   const scene = searchParams?.get('scene');
 
-  const { data: rounds, loading: roundsLoading } = useRequest(
+  const { data: rounds } = useRequest(
     async () =>
       await sendGetRequest('/v1/editor/sql/rounds', {
         con_uid: id,
       }),
     {
-      onSuccess: (res) => {
+      onSuccess: res => {
         const lastItem = res?.data?.[res?.data?.length - 1];
         if (lastItem) {
           setCurrentRound(lastItem?.round);
@@ -124,7 +182,7 @@ function DbEditor() {
 
   const { run: runSql, loading: runLoading } = useRequest(
     async () => {
-      const db_name = rounds?.data?.find((item) => item.round === currentRound)?.db_name;
+      const db_name = rounds?.data?.find((item: any) => item.round === currentRound)?.db_name;
       return await sendSpacePostRequest(`/api/v1/editor/sql/run`, {
         db_name,
         sql: newEditorValue?.sql,
@@ -132,7 +190,7 @@ function DbEditor() {
     },
     {
       manual: true,
-      onSuccess: (res) => {
+      onSuccess: res => {
         setTableData({
           columns: res?.data?.colunms,
           values: res?.data?.values,
@@ -143,7 +201,7 @@ function DbEditor() {
 
   const { run: runCharts, loading: runChartsLoading } = useRequest(
     async () => {
-      const db_name = rounds?.data?.find((item) => item.round === currentRound)?.db_name;
+      const db_name = rounds?.data?.find((item: any) => item.round === currentRound)?.db_name;
       const params: {
         db_name: string;
         sql?: string;
@@ -160,7 +218,7 @@ function DbEditor() {
     {
       manual: true,
       ready: !!newEditorValue?.sql,
-      onSuccess: (res) => {
+      onSuccess: res => {
         if (res?.success) {
           setTableData({
             columns: res?.data?.sql_data?.colunms || [],
@@ -196,7 +254,7 @@ function DbEditor() {
     },
     {
       manual: true,
-      onSuccess: (res) => {
+      onSuccess: res => {
         if (res?.success) {
           runSql();
         }
@@ -206,12 +264,12 @@ function DbEditor() {
 
   const { run: submitChart, loading: submitChartLoading } = useRequest(
     async () => {
-      const db_name = rounds?.data?.find((item) => item.round === currentRound)?.db_name;
+      const db_name = rounds?.data?.find((item: any) => item.round === currentRound)?.db_name;
       return await sendSpacePostRequest(`/api/v1/chart/editor/submit`, {
         conv_uid: id,
         chart_title: newEditorValue?.title,
         db_name,
-        old_sql: editorValue?.[currentTabIndex]?.sql,
+        old_sql: editorValue?.[currentTabIndex ?? 0]?.sql,
         new_chart_type: newEditorValue?.showcase,
         new_sql: newEditorValue?.sql,
         new_comment: newEditorValue?.thoughts?.match(/^\n--(.*)\n\n$/)?.[1]?.trim() || newEditorValue?.thoughts,
@@ -220,7 +278,7 @@ function DbEditor() {
     },
     {
       manual: true,
-      onSuccess: (res) => {
+      onSuccess: res => {
         if (res?.success) {
           runCharts();
         }
@@ -244,19 +302,19 @@ function DbEditor() {
   );
 
   const { run: handleGetEditorSql } = useRequest(
-    async (round) =>
+    async round =>
       await sendGetRequest('/v1/editor/sql', {
         con_uid: id,
         round,
       }),
     {
       manual: true,
-      onSuccess: (res) => {
+      onSuccess: res => {
         let sql = undefined;
         try {
           if (Array.isArray(res?.data)) {
             sql = res?.data;
-            setCurrentTabIndex('0');
+            setCurrentTabIndex(0);
           } else if (typeof res?.data === 'string') {
             const d = JSON.parse(res?.data);
             sql = d;
@@ -277,37 +335,45 @@ function DbEditor() {
     },
   );
 
-  const treeData = React.useMemo(() => {
+  const treeData = useMemo(() => {
     const loop = (data: Array<ITableTreeItem>, parentKey?: string | number): DataNode[] =>
       data.map((item: ITableTreeItem) => {
         const strTitle = item.title;
         const index = strTitle.indexOf(searchValue);
         const beforeStr = strTitle.substring(0, index);
         const afterStr = strTitle.slice(index + searchValue.length);
+        const renderIcon = (type: string) => {
+          switch (type) {
+            case 'db':
+              return <Database />;
+            case 'table':
+              return <TableIcon />;
+            default:
+              return <Field />;
+          }
+        };
         const showTitle =
           index > -1 ? (
-            <Tooltip title={(item?.comment || item?.title) + (item?.can_null === 'YES' ? '(can null)' : `(can't null)`)}>
-              <span>
+            <Tooltip
+              title={(item?.comment || item?.title) + (item?.can_null === 'YES' ? '(can null)' : `(can't null)`)}
+            >
+              <div className='flex items-center'>
+                {renderIcon(item.type)}&nbsp;&nbsp;&nbsp;
                 {beforeStr}
-                <span className="text-[#1677ff]">{searchValue}</span>
-                {afterStr}
-                {item?.type && (
-                  <Typography gutterBottom level="body3" className="pl-0.5" style={{ display: 'inline' }}>
-                    {`[${item?.type}]`}
-                  </Typography>
-                )}
-              </span>
+                <span className='text-[#1677ff]'>{searchValue}</span>
+                {afterStr}&nbsp;
+                {item?.type && <div className='text-gray-400'>{item?.type}</div>}
+              </div>
             </Tooltip>
           ) : (
-            <Tooltip title={(item?.comment || item?.title) + (item?.can_null === 'YES' ? '(can null)' : `(can't null)`)}>
-              <span>
-                {strTitle}
-                {item?.type && (
-                  <Typography gutterBottom level="body3" className="pl-0.5" style={{ display: 'inline' }}>
-                    {`[${item?.type}]`}
-                  </Typography>
-                )}
-              </span>
+            <Tooltip
+              title={(item?.comment || item?.title) + (item?.can_null === 'YES' ? '(can null)' : `(can't null)`)}
+            >
+              <div className='flex items-center'>
+                {renderIcon(item.type)}&nbsp;&nbsp;&nbsp;
+                {strTitle}&nbsp;
+                {item?.type && <div className='text-gray-400'>{item?.type}</div>}
+              </div>
             </Tooltip>
           );
         if (item.children) {
@@ -329,8 +395,8 @@ function DbEditor() {
     return [];
   }, [searchValue, tables]);
 
-  const dataList = React.useMemo(() => {
-    let res: { key: string | number; title: string; parentKey?: string | number }[] = [];
+  const dataList = useMemo(() => {
+    const res: { key: string | number; title: string; parentKey?: string | number }[] = [];
     const generateList = (data: DataNode[], parentKey?: string | number) => {
       if (!data || data?.length <= 0) return;
       for (let i = 0; i < data.length; i++) {
@@ -348,12 +414,12 @@ function DbEditor() {
     return res;
   }, [treeData]);
 
-  const getParentKey = (key: React.Key, tree: DataNode[]): React.Key => {
-    let parentKey: React.Key;
+  const getParentKey = (key: Key, tree: DataNode[]): Key => {
+    let parentKey: Key;
     for (let i = 0; i < tree.length; i++) {
       const node = tree[i];
       if (node.children) {
-        if (node.children.some((item) => item.key === key)) {
+        if (node.children.some(item => item.key === key)) {
           parentKey = node.key;
         } else if (getParentKey(key, node.children)) {
           parentKey = getParentKey(key, node.children);
@@ -363,40 +429,40 @@ function DbEditor() {
     return parentKey!;
   };
 
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { value } = e.target;
     if (tables?.data) {
       if (!value) {
         setExpandedKeys([]);
       } else {
         const newExpandedKeys = dataList
-          .map((item) => {
+          .map(item => {
             if (item.title.indexOf(value) > -1) {
               return getParentKey(item.key, treeData);
             }
             return null;
           })
           .filter((item, i, self) => item && self.indexOf(item) === i);
-        setExpandedKeys(newExpandedKeys as React.Key[]);
+        setExpandedKeys(newExpandedKeys as Key[]);
       }
       setSearchValue(value);
       setAutoExpandParent(true);
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentRound) {
       handleGetEditorSql(currentRound);
     }
   }, [handleGetEditorSql, currentRound]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (editorValue && scene === 'chat_dashboard' && currentTabIndex) {
       runCharts();
     }
   }, [currentTabIndex, scene, editorValue, runCharts]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (editorValue && scene !== 'chat_dashboard') {
       runSql();
     }
@@ -406,7 +472,7 @@ function DbEditor() {
     if (!value) {
       return { sql: '', thoughts: '' };
     }
-    const match = value && value.match(/(--.*)\n([\s\S]*)/);
+    const match = value && value.match(/(--.*)?\n?([\s\S]*)/);
     let thoughts = '';
     let sql;
     if (match && match.length >= 3) {
@@ -417,126 +483,177 @@ function DbEditor() {
   }
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className='flex flex-col w-full h-full overflow-hidden'>
       <Header />
-      <div className="relative flex flex-1 overflow-auto">
-        <div
-          className="text h-full border-[var(--joy-palette-divider)] border-r border-solid p-3 max-h-full overflow-auto"
-          style={{ width: '300px' }}
-        >
-          <div className="absolute right-4 top-2 z-10">
-            <Button
-              className="mr-2"
-              type="primary"
-              loading={runLoading || runChartsLoading}
-              onClick={async () => {
-                if (scene === 'chat_dashboard') {
-                  runCharts();
-                } else {
-                  runSql();
-                }
-              }}
-            >
-              Run
-            </Button>
-            <Button
-              loading={submitLoading || submitChartLoading}
-              onClick={async () => {
-                if (scene === 'chat_dashboard') {
-                  await submitChart();
-                } else {
-                  await submitSql();
-                }
-              }}
-            >
-              Save
-            </Button>
+      <div className='relative flex flex-1 p-4 pt-0 overflow-hidden'>
+        <div className='relative flex overflow-hidden mr-4'>
+          <div
+            className={classNames('h-full relative transition-[width] overflow-hidden', {
+              'w-0': isMenuExpand,
+              'w-64': !isMenuExpand,
+            })}
+          >
+            <div className='relative w-64 h-full overflow-hidden flex flex-col rounded bg-white dark:bg-theme-dark-container p-4'>
+              <Select
+                size='middle'
+                className='w-full mb-2'
+                value={currentRound}
+                options={rounds?.data?.map((item: RoundProps) => {
+                  return {
+                    label: item.round_name,
+                    value: item.round,
+                  };
+                })}
+                onChange={e => {
+                  setCurrentRound(e);
+                }}
+              />
+              <Search className='mb-2' placeholder='Search' onChange={onChange} />
+              {treeData && treeData.length > 0 && (
+                <div className='flex-1 overflow-y-auto'>
+                  <Tree
+                    onExpand={(newExpandedKeys: Key[]) => {
+                      setExpandedKeys(newExpandedKeys);
+                      setAutoExpandParent(false);
+                    }}
+                    expandedKeys={expandedKeys}
+                    autoExpandParent={autoExpandParent}
+                    treeData={treeData}
+                    fieldNames={{
+                      title: 'showTitle',
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex items-center py-3">
-            <Select
-              className="h-4 min-w-[240px]"
-              size="sm"
-              value={currentRound as string | null | undefined}
-              onChange={(e: React.SyntheticEvent | null, newValue: string | null) => {
-                setCurrentRound(newValue);
+          <div className='absolute right-0 top-0 translate-x-full h-full flex items-center justify-center opacity-0 hover:opacity-100 group-hover/side:opacity-100 transition-opacity'>
+            <div
+              className='bg-white w-4 h-10 flex items-center justify-center dark:bg-theme-dark-container rounded-tr rounded-br z-10 text-xs cursor-pointer shadow-[4px_0_10px_rgba(0,0,0,0.06)] text-opacity-80'
+              onClick={() => {
+                setIsMenuExpand(!isMenuExpand);
               }}
             >
-              {rounds?.data?.map((item: RoundProps) => (
-                <Option key={item?.round} value={item?.round}>
-                  {item?.round_name}
-                </Option>
-              ))}
-            </Select>
-            <AutoAwesomeMotionIcon className="ml-2" />
+              {!isMenuExpand ? <LeftOutlined /> : <RightOutlined />}
+            </div>
           </div>
-          <Search style={{ marginBottom: 8 }} placeholder="Search" onChange={onChange} />
-          {treeData && treeData.length > 0 && (
-            <Tree
-              onExpand={(newExpandedKeys: React.Key[]) => {
-                setExpandedKeys(newExpandedKeys);
-                setAutoExpandParent(false);
-              }}
-              expandedKeys={expandedKeys}
-              autoExpandParent={autoExpandParent}
-              treeData={treeData}
-              fieldNames={{
-                title: 'showTitle',
-              }}
-            />
-          )}
         </div>
-        <div className="flex flex-col flex-1 max-w-full overflow-hidden">
-          {Array.isArray(editorValue) ? (
-            <>
-              <Box
-                className="h-full"
-                sx={{
-                  '.ant-tabs-content, .ant-tabs-tabpane-active': {
-                    height: '100%',
-                  },
-                  '& .ant-tabs-card.ant-tabs-top >.ant-tabs-nav .ant-tabs-tab, & .ant-tabs-card.ant-tabs-top >div>.ant-tabs-nav .ant-tabs-tab': {
-                    borderRadius: '0',
-                  },
+        <div className='flex flex-col flex-1 max-w-full overflow-hidden'>
+          {/* Actions */}
+          <div className='mb-2 bg-white dark:bg-theme-dark-container p-2 flex justify-between items-center'>
+            <div className='flex gap-2'>
+              <Button
+                className='text-xs rounded-none'
+                size='small'
+                type='primary'
+                icon={<CaretRightOutlined />}
+                loading={runLoading || runChartsLoading}
+                onClick={async () => {
+                  if (scene === 'chat_dashboard') {
+                    runCharts();
+                  } else {
+                    runSql();
+                  }
                 }}
               >
-                <Tabs
-                  className="h-full dark:text-white px-2"
-                  activeKey={currentTabIndex}
-                  onChange={(activeKey) => {
-                    setCurrentTabIndex(activeKey);
-                    setNewEditorValue(editorValue?.[Number(activeKey)]);
-                  }}
-                  items={editorValue?.map((item, i) => ({
-                    key: i + '',
-                    label: item?.title,
-                    children: (
-                      <div className="flex flex-col h-full">
-                        <DbEditorContent
-                          editorValue={item}
-                          handleChange={(value) => {
-                            const { sql, thoughts } = resolveSqlAndThoughts(value);
-                            setNewEditorValue((old) => {
-                              return Object.assign({}, old, {
-                                sql,
-                                thoughts,
-                              });
-                            });
-                          }}
-                          tableData={tableData}
-                          chartData={chartData}
-                        />
-                      </div>
-                    ),
-                  }))}
-                />
-              </Box>
-            </>
+                Run
+              </Button>
+              <Button
+                className='text-xs rounded-none'
+                type='primary'
+                size='small'
+                loading={submitLoading || submitChartLoading}
+                icon={<SaveFilled />}
+                onClick={async () => {
+                  if (scene === 'chat_dashboard') {
+                    await submitChart();
+                  } else {
+                    await submitSql();
+                  }
+                }}
+              >
+                Save
+              </Button>
+            </div>
+            <div className='flex gap-2'>
+              <Icon
+                className={classNames('flex items-center justify-center w-6 h-6 text-lg rounded', {
+                  'bg-theme-primary bg-opacity-10': layout === 'TB',
+                })}
+                component={SplitScreenWeight}
+                onClick={() => {
+                  setLayout('TB');
+                }}
+              />
+              <Icon
+                className={classNames('flex items-center justify-center w-6 h-6 text-lg rounded', {
+                  'bg-theme-primary bg-opacity-10': layout === 'LR',
+                })}
+                component={SplitScreenHeight}
+                onClick={() => {
+                  setLayout('LR');
+                }}
+              />
+            </div>
+          </div>
+          {/* Panel */}
+          {Array.isArray(editorValue) ? (
+            <div className='flex flex-col h-full overflow-hidden'>
+              <div className='w-full whitespace-nowrap overflow-x-auto bg-white dark:bg-theme-dark-container mb-2 text-[0px]'>
+                {editorValue.map((item, index) => (
+                  <Tooltip className='inline-block' key={item.title} title={item.title}>
+                    <div
+                      className={classNames(
+                        'max-w-[240px] px-3 h-10 text-ellipsis overflow-hidden whitespace-nowrap text-sm leading-10 cursor-pointer font-semibold hover:text-theme-primary transition-colors mr-2 last-of-type:mr-0',
+                        {
+                          'border-b-2 border-solid border-theme-primary text-theme-primary': currentTabIndex === index,
+                        },
+                      )}
+                      onClick={() => {
+                        setCurrentTabIndex(index);
+                        setNewEditorValue(editorValue?.[index]);
+                      }}
+                    >
+                      {item.title}
+                    </div>
+                  </Tooltip>
+                ))}
+              </div>
+              <div className='flex flex-1 overflow-hidden'>
+                {editorValue.map((item, index) => (
+                  <div
+                    key={item.title}
+                    className={classNames('w-full overflow-hidden', {
+                      hidden: index !== currentTabIndex,
+                      'block flex-1': index === currentTabIndex,
+                    })}
+                  >
+                    <DbEditorContent
+                      layout={layout}
+                      editorValue={item}
+                      handleChange={value => {
+                        const { sql, thoughts } = resolveSqlAndThoughts(value);
+                        setNewEditorValue(old => {
+                          return Object.assign({}, old, {
+                            sql,
+                            thoughts,
+                          });
+                        });
+                      }}
+                      tableData={tableData}
+                      chartData={chartData}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
             <DbEditorContent
+              layout={layout}
               editorValue={editorValue}
-              handleChange={(value) => {
+              handleChange={value => {
                 const { sql, thoughts } = resolveSqlAndThoughts(value);
-                setNewEditorValue((old) => {
+                setNewEditorValue(old => {
                   return Object.assign({}, old, {
                     sql,
                     thoughts,
@@ -545,6 +662,7 @@ function DbEditor() {
               }}
               tableData={tableData}
               chartData={undefined}
+              tables={tables}
             />
           )}
         </div>
